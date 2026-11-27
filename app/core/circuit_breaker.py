@@ -120,6 +120,12 @@ class CircuitBreaker:
         # provider. Acquired AFTER the open-check so an open breaker never queues.
         sem = self._semaphore()
         async with sem:
+            # The breaker may have opened while this call waited for a slot.
+            if self.state == "open":
+                self._short_circuited += 1
+                logger.warning("[circuit] %s OPEN — skipping queued call, returning fallback", self.name)
+                return fallback
+
             self._in_flight += 1
             self._peak_in_flight = max(self._peak_in_flight, self._in_flight)
             try:
@@ -149,6 +155,11 @@ class CircuitBreaker:
             raise CircuitOpenError(self.name)
         sem = self._semaphore()
         async with sem:
+            # Reject queued callers before counting them as provider attempts.
+            if self.state == "open":
+                self._short_circuited += 1
+                raise CircuitOpenError(self.name)
+
             self._in_flight += 1
             self._peak_in_flight = max(self._peak_in_flight, self._in_flight)
             try:
