@@ -88,6 +88,56 @@ def test_guard_raises_on_open_and_records():
     assert br.stats()["short_circuited"] == 1
 
 
+@pytest.mark.parametrize("use_guard", [False, True], ids=["call", "guard"])
+def test_breaker_rechecks_open_state_after_queueing(use_guard):
+    """Calls already waiting for a slot must skip the provider if earlier
+    failures open the breaker before they acquire the semaphore."""
+    br = CircuitBreaker("t-queued", failure_threshold=2, recovery_timeout=999,
+                        max_concurrency=1, timeout=5.0)
+    calls = {"n": 0}
+
+    async def run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def boom():
+            calls["n"] += 1
+            started.set()
+            await release.wait()
+            raise RuntimeError("provider down")
+
+        async def invoke():
+            if use_guard:
+                async with br.guard():
+                    return await boom()
+            return await br.call(boom, fallback="fb")
+
+        first = asyncio.create_task(invoke())
+        await asyncio.wait_for(started.wait(), timeout=5.0)
+        queued = [asyncio.create_task(invoke()) for _ in range(5)]
+        # Let every caller reach the semaphore while the first attempt is held.
+        await asyncio.sleep(0)
+        release.set()
+        return await asyncio.wait_for(
+            asyncio.gather(first, *queued, return_exceptions=True), timeout=5.0,
+        )
+
+    results = asyncio.run(run())
+    assert calls["n"] == 2
+    if use_guard:
+        assert sum(isinstance(result, RuntimeError) for result in results) == 2
+        assert sum(isinstance(result, CircuitOpenError) for result in results) == 4
+    else:
+        assert results == ["fb"] * 6
+    s = br.stats()
+    assert s["state"] == "open"
+    assert s["calls"] == 6
+    assert s["failures"] == 2 and s["consecutive_failures"] == 2
+    assert s["short_circuited"] == 4
+    assert s["successes"] == 0 and s["timeouts"] == 0
+    assert s["in_flight"] == 0 and s["peak_in_flight"] == 1
+
+
 def test_generation_queue_caps_and_queues(monkeypatch):
     """The generation queue admits at most `capacity` at once; the rest wait and
     are counted as queued."""
