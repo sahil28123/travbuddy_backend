@@ -92,6 +92,9 @@ async def get_rates(property_id: str, from_date: date, days: int) -> list[dict]:
                 "date": r["date"],
                 "pricePaise": r["price_paise"],
                 "minStay": r["min_stay"],
+                # Read with .get: older deployments of property_rates do not
+                # return it, and the channel push simply omits maxNights then.
+                "maxStay": r.get("max_stay"),
                 "closedToArrival": r["closed_to_arrival"],
                 "closedToDeparture": r["closed_to_departure"],
                 "closed": r["closed"],
@@ -166,7 +169,11 @@ async def set_inventory(
         except Exception as exc:  # noqa: BLE001 — re-raised as a readable one
             raise _readable(exc) from exc
 
-    return await run_db(_write)
+    nights = await run_db(_write)
+    # Out to the channels. Never raises — see services/repull/ari_push.py.
+    from app.services.repull import ari_push
+    await ari_push.enqueue_ari_push(property_id, room_type_id, from_date, to_date)
+    return nights
 
 
 async def set_rates(
@@ -206,4 +213,8 @@ async def set_rates(
         except Exception as exc:  # noqa: BLE001 — re-raised as a readable one
             raise _readable(exc) from exc
 
-    return await run_db(_write)
+    nights = await run_db(_write)
+    # Out to the channels, if this is the plan they sell. Never raises.
+    from app.services.repull import ari_push
+    await ari_push.enqueue_rate_plan(property_id, rate_plan_id, from_date, to_date)
+    return nights

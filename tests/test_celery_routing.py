@@ -34,6 +34,10 @@ HOTEL_OS_TASKS = [
     # reconciliation run against the marketplace database would find every
     # hotel's inventory missing and say so hourly.
     "travbuddy.pms.reconcile_inventory",
+    # The calendar out to Repull, and the nightly pass that queues it. Both
+    # read `room_inventory` / `repull_room_map`, which only the hotel OS has.
+    "travbuddy.pms.repull_push",
+    "travbuddy.pms.repull_resync_all",
 ]
 
 MARKETPLACE_TASKS = [
