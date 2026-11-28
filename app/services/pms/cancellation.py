@@ -375,6 +375,11 @@ async def cancel(property_id: str, reservation_id: str, *, reason: str | None = 
         _apply, property_id, reservation, settlement,
         reason, actor, actor_name, member_id,
     )
+    if applied["inventoryReleased"]:
+        # The room is sellable again; tell the channels. Never raises.
+        from app.services.repull import ari_push
+        await ari_push.enqueue_stay(property_id, reservation.get("room_type_id"),
+                                    reservation.get("check_in"), reservation.get("check_out"))
 
     return {
         "reservationId": reservation["id"],

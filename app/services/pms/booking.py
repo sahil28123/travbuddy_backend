@@ -645,4 +645,10 @@ async def create_reservation(
 
         return reservation
 
-    return await run_db(_write)
+    reservation = await run_db(_write)
+    # The stock moved; tell the channels. Never raises — a sale must not fail
+    # because Repull is unreachable.
+    from app.services.repull import ari_push
+    await ari_push.enqueue_stay(property_id, reservation.get("room_type_id"),
+                                reservation.get("check_in"), reservation.get("check_out"))
+    return reservation
