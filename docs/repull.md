@@ -228,7 +228,9 @@ the hotelier to sign in again, it includes a `fixUrl` to send them to.
 
 - an edit in the rate calendar (prices, rooms for sale, stop-sell, minimum and
   maximum stay, closed to arrival or departure);
-- a booking, a cancellation, or a quote hold being released;
+- a booking or a cancellation that moves rooms (a quote hold counts as taken
+  while it is active; when it expires, the next push or the nightly resync puts
+  the room back on sale);
 - a room type being mapped;
 - every night, a full resync of the next `REPULL_RESYNC_DAYS` days as a safety
   net. You can also run it by hand:
@@ -238,9 +240,14 @@ POST /api/v1/pms/properties/{property_id}/repull/resync
 { "days": 365 }
 ```
 
-For each night HostOS sends: rooms left to sell (capped at the listing's room
-count on the channel), whether the night is open, the price from the mapped
-rate plan, minimum and maximum stay, and closed-to-arrival or departure.
+Editing a rate plan that is not the one sold on the channels (a B2B rate, say)
+sends nothing.
+
+For each night HostOS sends: rooms left to sell (rooms for sale minus booked,
+held and blocked; capped at the listing's room count on the channel; rooms the
+hotel only agreed to oversell are never offered to the OTAs), whether the
+night is open, the price from the mapped rate plan, minimum and maximum stay,
+and closed-to-arrival or departure.
 Consecutive nights with identical values go in one request. Pushes run in the
 background, so a calendar edit or a booking never waits on a channel. They are
 retried automatically if Repull or a channel is briefly unavailable.
@@ -251,6 +258,9 @@ retried automatically if Repull or a channel is briefly unavailable.
   its `source` and the OTA confirmation code in `external_ref`. The guest is
   matched to an existing guest record by phone or email. The room comes off sale
   on every other channel.
+- **Booking requests** (an Airbnb request-to-book, for example) are stored as
+  pending and take no room until the channel confirms them, which is HostOS's
+  normal rule for pending reservations.
 - **Changed dates or room:** the old nights are released and the new ones booked.
 - **Cancelled:** the reservation is cancelled through HostOS's normal
   cancellation path and the room goes back on sale.

@@ -165,8 +165,9 @@ def test_a_channel_booking_becomes_a_confirmed_reservation_and_takes_its_room(ho
     # The night trail sums back to the stay.
     nights = hotel.rows("reservation_nights")
     assert len(nights) == 2 and sum(n["room_paise"] for n in nights) == 1234567
+    # The stay's nights: check-out day is not a night sold.
     assert hotel.pushes == [(DELUXE, CHECK_IN.isoformat(),
-                             (CHECK_IN + timedelta(days=2)).isoformat())]
+                             (CHECK_IN + timedelta(days=1)).isoformat())]
     assert hotel.escalations == []
 
 
@@ -227,7 +228,7 @@ def test_new_dates_release_the_old_nights_and_take_the_new(hotel):
     nights = hotel.rows("reservation_nights")
     assert len(nights) == 3 and sum(n["room_paise"] for n in nights) == 1500000
     # Both ranges pushed: the old nights are back on sale on every channel.
-    assert (DELUXE, CHECK_IN.isoformat(), (CHECK_IN + timedelta(days=2)).isoformat()) \
+    assert (DELUXE, CHECK_IN.isoformat(), (CHECK_IN + timedelta(days=1)).isoformat()) \
         in hotel.pushes[1:]
     assert len(hotel.pushes) == 3
 

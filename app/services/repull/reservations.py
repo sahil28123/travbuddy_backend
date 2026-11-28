@@ -314,7 +314,7 @@ async def _push(property_id: str, room_type_id: str | None, check_in, check_out)
         return
     try:
         from app.services.repull import ari_push
-        await ari_push.enqueue_ari_push(property_id, room_type_id, check_in, check_out)
+        await ari_push.enqueue_stay(property_id, room_type_id, check_in, check_out)
     except Exception:  # noqa: BLE001 — the reservation is already right
         logger.warning("could not queue an ARI push for room type %s", room_type_id,
                        exc_info=True)
