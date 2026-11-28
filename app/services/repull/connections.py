@@ -182,8 +182,13 @@ async def refresh_status(property_id: str) -> dict:
 
 # ── room types ⇄ listings ────────────────────────────────────────────────────
 
-async def listings(property_id: str) -> list[dict]:
-    """Every Repull listing in this hotel's workspace (room types, homes)."""
+async def listings(property_id: str, *, include: str | None = None) -> list[dict]:
+    """
+    Every Repull listing in this hotel's workspace (room types, homes).
+
+    `include` is Repull's expansion list (`"pricing"`, `"details"`…), passed
+    through for the callers that need more than the summary row.
+    """
     from repull.api.listings import list_listings
 
     conn = await connection(property_id)
@@ -192,6 +197,8 @@ async def listings(property_id: str) -> list[dict]:
     out, cursor = [], None
     for _ in range(50):  # 50 pages × 100 is far beyond any one hotel
         kwargs = {"limit": 100}
+        if include:
+            kwargs["include"] = include
         if cursor:
             kwargs["cursor"] = cursor
         page = await call(list_listings.asyncio_detailed,
