@@ -153,17 +153,29 @@ curl -X POST https://api.repull.dev/v1/webhooks \
   }'
 ```
 
+Register it **once, on your own account**: send no `X-Workspace-Id` header.
+Each hotel's workspace delivers its events to this one webhook, tagged with
+`workspaceId`, which is how HostOS knows which hotel an event belongs to. A
+webhook registered inside a hotel's workspace would receive nothing.
+
 The response contains `secret` (`whsec_…`) **once**. Put it in
 `REPULL_WEBHOOK_SECRET`. HostOS rejects every delivery whose signature does not
 match (see
 [repull.dev/docs/webhooks/verify-signatures](https://repull.dev/docs/webhooks/verify-signatures)).
 
-To check the endpoint, send a sample event:
+To check the endpoint, send a ping or a sample event:
 
 ```bash
+curl -X POST https://api.repull.dev/v1/webhooks/<webhook-id>/ping \
+  -H "Authorization: Bearer $REPULL_API_KEY"
 curl -X POST https://api.repull.dev/v1/webhooks/<webhook-id>/test/reservation.created \
   -H "Authorization: Bearer $REPULL_API_KEY"
 ```
+
+Both should report `statusCode: 200`. A sample event is not tied to any of
+your hotels, so HostOS answers it with `"ignored": "unknown workspace"`. That
+confirms the signature check passed and nothing was booked. A 401 means the
+secret is wrong.
 
 ---
 
