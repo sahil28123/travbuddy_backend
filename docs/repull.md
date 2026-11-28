@@ -281,6 +281,16 @@ agents and staff answer it in the same inbox. Replies are sent back through
 Repull to the channel the guest wrote on. OTAs have no 24-hour window and no
 message templates, so neither applies on this channel.
 
+The OTAs forbid moving a guest off their platform, and Airbnb rejects messages
+that carry outside links. So in an OTA thread the AI agents still answer
+questions, quote and help, but they are never offered the tools that create a
+direct booking, send a payment link, link to the hotel's own pages, or cancel
+the booking in HostOS. A cancellation of an OTA booking happens on the OTA and
+reaches HostOS by webhook.
+
+When a hotel first connects, its guest agent is set to answer OTA threads too.
+To hand OTA threads to staff instead, remove `ota` from that agent's channels.
+
 ---
 
 ## 6. Importing a hotel from another PMS

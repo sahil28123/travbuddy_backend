@@ -21,6 +21,7 @@ from app.db.client import get_db, run_db
 from app.services.ai.context import AgentContext
 from app.services.ai.errors import OutOfScope, ToolUnavailable
 from app.services.ai.ids import ResourceId
+from app.services.ai import registry
 from app.services.ai.registry import tool
 from app.services.ai.tools import ACTOR_RESERVATION
 from app.services.pms import booking as booking_service
@@ -215,6 +216,7 @@ async def _verify_booking(args: "BookingArgs", ctx: AgentContext,
         "also refuses should you hand over to the team."
     ),
     verify=_verify_booking,
+    requires=(registry.OFF_PLATFORM,),
 )
 async def create_booking(args: BookingArgs, ctx: AgentContext) -> tuple[dict, str]:
     ceiling = ctx.limits.get("max_booking_value_paise")
@@ -447,6 +449,7 @@ class BookingPaymentLinkArgs(BaseModel):
     # a guest is allowed to *give the hotel money*, which is not a safety
     # property. It is the thing that stopped the AI employee closing a sale.
     always_requires_approval=False,
+    requires=(registry.OFF_PLATFORM,),
 )
 async def create_booking_payment_link(
     args: BookingPaymentLinkArgs, ctx: AgentContext
@@ -997,6 +1000,7 @@ async def get_cancellation_quote(args: BookingStatusArgs, ctx: AgentContext) -> 
         "changed on their booking yet. Do not say it is cancelled and do not "
         "quote a refund."
     ),
+    requires=(registry.OFF_PLATFORM,),
 )
 async def cancel_booking(args: CancelArgs, ctx: AgentContext) -> tuple[dict, str | None]:
     from fastapi import HTTPException

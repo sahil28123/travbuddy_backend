@@ -233,3 +233,27 @@ def test_a_webhook_finds_its_hotel_by_workspace(hotel):
     assert run(connections.property_for_workspace("ws_1")) == PROPERTY
     assert run(connections.property_for_workspace("ws_unknown")) is None
     assert run(connections.property_for_workspace(None)) is None
+
+
+def test_first_connect_lets_the_guest_agent_answer_ota_threads(hotel, monkeypatch):
+    """A guest agent stored before this integration had no `ota` channel."""
+    hotel.store["repull_connections"] = []
+    hotel.seed("properties", {"id": PROPERTY, "partner_id": "p1", "name": "Hotel Test"})
+    hotel.seed("agents",
+               {"id": "ag_guest", "property_id": PROPERTY, "agent_type": "guest",
+                "channels": ["whatsapp", "instagram", "website"]},
+               {"id": "ag_owner", "property_id": PROPERTY, "agent_type": "owner",
+                "channels": ["internal"]})
+    monkeypatch.setattr(connections.settings, "repull_connect_redirect_url", "https://x.test/back")
+
+    async def fake_call(fn, *, workspace_id=None, **kw):
+        assert workspace_id is None  # first connect creates the workspace
+        return {"url": "https://connect.repull.dev/cs_1", "workspaceId": 2164}
+
+    monkeypatch.setattr(connections, "call", fake_call)
+    out = run(connections.start_connect(PROPERTY))
+    assert out["workspaceId"] == 2164
+    agents = {a["id"]: a["channels"] for a in hotel.rows("agents")}
+    assert agents["ag_guest"] == ["whatsapp", "instagram", "website", "ota"]
+    assert agents["ag_owner"] == ["internal"]
+    assert hotel.rows("repull_connections")[0]["workspace_id"] == "2164"

@@ -105,6 +105,28 @@ def _save_connection(property_id: str, partner_id: str | None, workspace_id: str
             .upsert(row, on_conflict="property_id").execute().data or [row])[0]
 
 
+def _guest_agent_answers_ota(property_id: str) -> None:
+    """
+    Let the hotel's guest agent answer OTA threads.
+
+    `agents.channels` is the hotel's own setting, and a guest agent provisioned
+    before this integration existed was stored without `ota` — so its OTA
+    messages would route to a person. Added once, when the hotel first connects,
+    rather than by a blanket migration: only hotels that chose to sell on the
+    OTAs change, and a hotel that later removes `ota` by hand keeps its choice,
+    because this never runs again for it.
+    """
+    db = get_db()
+    rows = (db.table("agents").select("id, channels")
+            .eq("property_id", property_id).eq("agent_type", "guest")
+            .execute().data or [])
+    for agent in rows:
+        channels = list(agent.get("channels") or [])
+        if "ota" not in channels:
+            db.table("agents").update({"channels": channels + ["ota"]}) \
+                .eq("id", agent["id"]).execute()
+
+
 async def start_connect(property_id: str, *, purpose: str = "connect",
                         redirect_url: str | None = None) -> dict:
     """
@@ -154,6 +176,10 @@ async def start_connect(property_id: str, *, purpose: str = "connect",
                             "Repull did not return a workspace for this hotel")
     if not existing:
         await run_db(_save_connection, property_id, prop.get("partner_id"), workspace_id)
+        try:
+            await run_db(_guest_agent_answers_ota, property_id)
+        except Exception:  # noqa: BLE001 — a person still sees the thread
+            logger.warning("could not add the ota channel to %s's guest agent", property_id)
     return {"url": session.get("url"), "expiresAt": session.get("expiresAt"),
             "workspaceId": workspace_id, "providers": providers}
 

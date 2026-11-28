@@ -107,6 +107,12 @@ class ChannelPolicy:
     # sending tools on exactly the channel where it most needs them.
     windowed: bool = True
 
+    # False where the channel's owner forbids taking the guest elsewhere — the
+    # OTA thread. The agent is then not offered direct bookings, payment links,
+    # links to the hotel's own pages or cancellations; see
+    # `ai.registry.OFF_PLATFORM`.
+    allows_off_platform: bool = True
+
     # Which `status` values on the connection row mean "send through this".
     # Meta connections say `connected`; a Repull workspace says `active`.
     live_statuses: tuple[str, ...] = ("connected", "pending")
@@ -179,6 +185,7 @@ _POLICIES = {
         bills_per_conversation=False,
         conversation_usage_type=None,
         windowed=False,
+        allows_off_platform=False,
         # `pending` is a workspace whose hotel has started Connect: a guest
         # message can only arrive once an account is attached, and refusing to
         # answer it over a status that lags by one webhook would be worse.
