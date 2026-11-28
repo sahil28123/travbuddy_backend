@@ -75,6 +75,8 @@ class SentMessage:
 
 def _resolve_connection(account_id: str, channel: str) -> dict | None:
     pol = policy.for_channel(channel)
+    if pol.resolver_rpc is None:
+        return _resolve_from_table(pol, account_id)
     rows = get_db().rpc(pol.resolver_rpc, {pol.resolver_arg: account_id}).execute().data or []
     if not rows:
         return None
@@ -84,6 +86,41 @@ def _resolve_connection(account_id: str, channel: str) -> dict | None:
     row["id"] = row.pop("connection_id")
     row[pol.account_column] = account_id
     row["channel"] = channel
+    return row
+
+
+def _resolve_from_table(pol: policy.ChannelPolicy, account_id: str) -> dict | None:
+    """
+    The OTA resolver: `repull_connections.workspace_id` → the hotel.
+
+    A table read rather than a definer function, for the reason `policy.py`
+    gives on `resolver_rpc`: the row is server-written and the id is Repull's,
+    delivered inside a signed webhook. Returned in the same shape the RPCs
+    produce, so `record_inbound` cannot tell the two routes apart.
+    """
+    db = get_db()
+    rows = (
+        db.table(pol.connections_table).select("*")
+        .eq(pol.account_column, account_id)
+        .in_("status", list(pol.live_statuses))
+        .limit(1).execute().data or []
+    )
+    if not rows:
+        return None
+    row = dict(rows[0])
+    row["id"] = row.get(pol.connection_key)
+    if not row.get("partner_id"):
+        # `repull_connections.partner_id` is nullable — a workspace can be
+        # created before the property row has been read — and a conversation
+        # cannot be. The property is the authority on whose hotel it is.
+        prop = (
+            db.table("properties").select("partner_id")
+            .eq("id", row["property_id"]).limit(1).execute().data or []
+        )
+        if not prop:
+            return None
+        row["partner_id"] = prop[0]["partner_id"]
+    row["channel"] = pol.channel
     return row
 
 
@@ -111,7 +148,7 @@ def _connection_for_property(property_id: str, channel: str = policy.WHATSAPP) -
         .table(pol.connections_table)
         .select("*")
         .eq("property_id", property_id)
-        .in_("status", ["connected", "pending"])
+        .in_("status", list(pol.live_statuses))
         .limit(1)
         .execute()
         .data
@@ -120,6 +157,7 @@ def _connection_for_property(property_id: str, channel: str = policy.WHATSAPP) -
     if not rows:
         return None
     row = dict(rows[0])
+    row.setdefault("id", row.get(pol.connection_key))
     # Carried so the adapter factory does not have to guess which provider a
     # connection row came from — the two tables have different id columns and a
     # row that has lost its channel is a row that can be sent to the wrong API.
@@ -198,7 +236,12 @@ def _upsert_conversation(
     # `guest_id` stayed null, `_link_reservation` never ran, and a guest who had
     # booked through this same thread was told nothing was found.
     guest_id = None
-    if sender_external_id:
+    # Not on an OTA thread. The sender id there is a Repull conversation id —
+    # six or seven digits that would sail through the phone match below and
+    # hand this thread to whichever guest's number happens to end in them. The
+    # guest on an OTA thread is found through the booking instead: see
+    # `_link_ota_reservation`, which reads Repull's own reservation id.
+    if sender_external_id and channel != policy.OTA:
         found = []
         if channel == "instagram":
             found = (
@@ -243,7 +286,10 @@ def _upsert_conversation(
         "external_id": external_id,
         "channel_account_id": account_id,
         "guest_phone": sender_external_id if channel == "whatsapp" else None,
-        "guest_handle": sender_external_id if channel == "instagram" else None,
+        # On an OTA thread the "handle" is the Repull conversation id: it is
+        # what `send()` passes as `to`, and the only address the guest has —
+        # the OTA keeps their real one to itself.
+        "guest_handle": sender_external_id if channel in ("instagram", policy.OTA) else None,
         "guest_name": sender_name,
         "guest_id": guest_id,
         "handler": "ai",
@@ -365,6 +411,45 @@ def _link_reservation(conversation: dict) -> dict:
     return updated[0] if updated else conversation
 
 
+def _link_ota_reservation(conversation: dict, reservation_id) -> dict:
+    """
+    Attach the OTA booking this thread belongs to, by Repull's own id.
+
+    `_link_reservation` starts from `guest_id`, which an OTA thread does not
+    have: the OTA hides the guest's phone and email, so there is nothing to
+    match a guest on. What it does have is better — Repull says which
+    reservation the conversation is about, and the booking import stored that
+    id as `reservations.external_id`. So the stay, and through it the guest,
+    come from the booking rather than from a guess.
+
+    A no-op when the message arrived before its booking was imported (Repull
+    sends `reservationId: null` for an inquiry). The next message on the thread
+    links it, which is soon enough: nothing the agent needs from the stay is
+    needed before the guest has one.
+    """
+    if conversation.get("reservation_id") or reservation_id in (None, ""):
+        return conversation
+
+    db = get_db()
+    rows = (
+        db.table("reservations").select("id,guest_id")
+        .eq("property_id", conversation["property_id"])
+        .eq("external_id", str(reservation_id))
+        .limit(1).execute().data or []
+    )
+    if not rows:
+        return conversation
+
+    patch = {"reservation_id": rows[0]["id"]}
+    if rows[0].get("guest_id") and not conversation.get("guest_id"):
+        patch["guest_id"] = rows[0]["guest_id"]
+    updated = (
+        db.table("conversations").update(patch)
+        .eq("id", conversation["id"]).execute().data
+    )
+    return updated[0] if updated else {**conversation, **patch}
+
+
 # ── inbound ──────────────────────────────────────────────────────────────────
 
 def _record_inbound(inbound: InboundMessage, connection: dict) -> RecordedInbound:
@@ -401,6 +486,8 @@ def _record_inbound(inbound: InboundMessage, connection: dict) -> RecordedInboun
         sender_name=inbound.sender_name,
         account_id=connection.get(pol.account_column) or "",
     )
+    if inbound.channel == policy.OTA:
+        conversation = _link_ota_reservation(conversation, inbound.raw.get("reservationId"))
     conversation = _link_reservation(conversation)
 
     # Was a window already open when this arrived? Computed before the update
@@ -471,7 +558,7 @@ def _record_inbound(inbound: InboundMessage, connection: dict) -> RecordedInboun
 
     db.table(pol.connections_table).update(
         {"last_inbound_at": sent_at}
-    ).eq("id", connection["id"]).execute()
+    ).eq(pol.connection_key, connection["id"]).execute()
 
     conversation = (
         db.table("conversations").select("*")
@@ -557,6 +644,10 @@ def window_open(conversation: dict, *, now: datetime | None = None) -> bool:
     correct, and is why a hotel cannot use this to message people who did not
     contact them.
     """
+    # An OTA thread never closes: the host may answer the guest at any time.
+    # Asked before the closing time, which is None here and would read as shut.
+    if policy.always_open(conversation.get("channel")):
+        return True
     closes = window_closes_at(conversation)
     if closes is None:
         return False

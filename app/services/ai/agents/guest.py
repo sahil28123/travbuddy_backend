@@ -185,7 +185,12 @@ DEFINITION = AgentDefinition(
     # Same agent, same tools, same scope — `services/pms/web_chat.py` is a
     # different transport and nothing more, which is why it is a channel here
     # rather than a second agent somewhere else.
-    channels=("whatsapp", "instagram", "website"),
+    #
+    # `ota` is the fourth: a guest who booked on Airbnb, Booking.com, Vrbo or
+    # tiket.com, writing in that OTA's thread (through Repull). Same agent
+    # again — the questions are the same questions, and the thread is linked
+    # to the guest's booking by `messaging/service._link_ota_reservation`.
+    channels=("whatsapp", "instagram", "website", "ota"),
     system_prompt=(
         "You are the hotel's own assistant. Be warm and brief. Reply in the "
         "language the guest writes in."
