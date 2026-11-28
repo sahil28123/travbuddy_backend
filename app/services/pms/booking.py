@@ -434,6 +434,70 @@ def _resolve_guest(
         return None
 
 
+# ── the stock and the row, shared by every way a booking arrives ─────────────
+#
+# `create_reservation` sells from a quote. A booking taken on Booking.com or
+# Airbnb (services/repull/reservations.py) arrives already sold, at the
+# channel's price, with no quote — but it moves the same counter and writes the
+# same row, and a second spelling of either is how the counter drifts. So the
+# three steps both paths take live here, once.
+
+def book_stock(db, room_type_id: str, check_in: str, check_out: str, units: int) -> bool:
+    """
+    Take `units` rooms off sale for these nights. False if they are not there.
+
+    `book_inventory` answers with what is left, or null/negative when it
+    refused — and a refusal moves nothing, so there is nothing to undo.
+    """
+    left = db.rpc(
+        "book_inventory",
+        {
+            "p_room_type": room_type_id,
+            "p_check_in": str(check_in),
+            "p_check_out": str(check_out),
+            "p_units": int(units),
+        },
+    ).execute().data
+    return not (left is None or left < 0)
+
+
+def release_stock(db, room_type_id: str, check_in: str, check_out: str, units: int) -> None:
+    """Put rooms back on sale. The same RPC cancellation releases through."""
+    db.rpc(
+        "release_booking",
+        {
+            "p_room_type": room_type_id,
+            "p_check_in": str(check_in),
+            "p_check_out": str(check_out),
+            "p_units": int(units),
+        },
+    ).execute()
+
+
+def insert_reservation(db, row: dict, *, compensate) -> dict:
+    """
+    Insert one reservation under a fresh booking reference.
+
+    A ref collision is a 1-in-30-million coincidence and a unique constraint
+    violation; retrying twice is cheaper than a wider ref. Any *other* failure
+    means the stock the caller already moved belongs to nobody, so `compensate`
+    runs before the error goes up — see the module docstring on compensation.
+    """
+    for _ in range(3):
+        try:
+            return (
+                db.table("reservations")
+                .insert({"ref": _new_ref(), **row})
+                .execute()
+            ).data[0]
+        except Exception as exc:  # noqa: BLE001 — retried, then re-raised
+            if "reservations_ref_key" not in str(exc):
+                compensate()
+                raise
+    compensate()
+    raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Could not allocate a booking reference")
+
+
 async def create_reservation(
     *,
     property_id: str,
@@ -492,18 +556,8 @@ async def create_reservation(
                     status.HTTP_409_CONFLICT,
                     "The hold on these rooms expired. Request a new price.",
                 )
-        else:
-            left = db.rpc(
-                "book_inventory",
-                {
-                    "p_room_type": q["room_type_id"],
-                    "p_check_in": q["check_in"],
-                    "p_check_out": q["check_out"],
-                    "p_units": q["units"],
-                },
-            ).execute().data
-            if left is None or left < 0:
-                raise HTTPException(status.HTTP_409_CONFLICT, "Those dates are no longer available")
+        elif not book_stock(db, q["room_type_id"], q["check_in"], q["check_out"], q["units"]):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Those dates are no longer available")
 
         paid = max(0, min(int(token_paise or 0), q["total_paise"]))
 
@@ -526,77 +580,59 @@ async def create_reservation(
             db, property_id, q["partner_id"], guest_name, guest_phone, guest_email,
         )
 
-        # A ref collision is a 1-in-30-million coincidence and a unique
-        # constraint violation; retrying twice is cheaper than a wider ref.
-        reservation = None
-        for _ in range(3):
-            try:
-                reservation = (
-                    db.table("reservations")
-                    .insert(
-                        {
-                            "ref": _new_ref(),
-                            "property_id": property_id,
-                            "partner_id": q["partner_id"],
-                            "room_type_id": q["room_type_id"],
-                            "rate_plan_id": q["rate_plan_id"],
-                            "quote_id": q["id"],
-                            "guest_name": guest_name,
-                            "guest_phone": guest_phone,
-                            "guest_email": guest_email,
-                            "guest_id": guest_id,
-                            "check_in": q["check_in"],
-                            "check_out": q["check_out"],
-                            "nights": (check_out - check_in).days,
-                            "units": q["units"],
-                            "adults": q["adults"],
-                            "children": q["children"],
-                            "gross_paise": q["gross_paise"],
-                            "discount_paise": q["discount_paise"],
-                            "tax_paise": q["tax_paise"],
-                            "total_paise": q["total_paise"],
-                            "paid_paise": paid,
-                            # Read off the quote, never off the request. There
-                            # is no `agencyId` parameter anywhere on the booking
-                            # path, so the only way a stay can be billed to a
-                            # credit line is if `b2b_commit_credit` put the
-                            # agency on the quote — which it only does under the
-                            # agency's own row lock, having checked the limit.
-                            "b2b_agent_id": q.get("b2b_agent_id"),
-                            "source": source,
-                            "status": "confirmed",
-                            "payment_status": _payment_status(paid, q["total_paise"]),
-                            "notes": notes,
-                            "created_by": created_by,
-                            # The thread it was sold in, if it was sold in one.
-                            # Falls back to the quote's own thread: an order
-                            # raised on the booking page for a quote the AI
-                            # made still belongs to that conversation, and the
-                            # guest asking about it is on that conversation.
-                            "conversation_id": conversation_id or q.get("conversation_id"),
-                            **fee_columns,
-                        }
-                    )
-                    .execute()
-                ).data[0]
-                break
-            except Exception as exc:  # noqa: BLE001 — retried, then re-raised
-                if "reservations_ref_key" not in str(exc):
-                    # Compensate: the stock moved, the reservation did not.
-                    if q.get("hold_id"):
-                        db.rpc(
-                            "release_booking",
-                            {
-                                "p_room_type": q["room_type_id"],
-                                "p_check_in": q["check_in"],
-                                "p_check_out": q["check_out"],
-                                "p_units": q["units"],
-                            },
-                        ).execute()
-                    raise
-        if reservation is None:
-            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Could not allocate a booking reference")
+        def _compensate():
+            # The stock moved, the reservation did not. Both branches above
+            # moved it — `convert_hold` and `book_inventory` each end in
+            # `units_booked` — so both are given back. This used to release
+            # only after a converted hold, which left a failed hold-less insert
+            # holding a room nobody had booked.
+            release_stock(db, q["room_type_id"], q["check_in"], q["check_out"], q["units"])
 
+        reservation = insert_reservation(
+            db,
+            {
+                "property_id": property_id,
+                "partner_id": q["partner_id"],
+                "room_type_id": q["room_type_id"],
+                "rate_plan_id": q["rate_plan_id"],
+                "quote_id": q["id"],
+                "guest_name": guest_name,
+                "guest_phone": guest_phone,
+                "guest_email": guest_email,
+                "guest_id": guest_id,
+                "check_in": q["check_in"],
+                "check_out": q["check_out"],
+                "nights": (check_out - check_in).days,
+                "units": q["units"],
+                "adults": q["adults"],
+                "children": q["children"],
+                "gross_paise": q["gross_paise"],
+                "discount_paise": q["discount_paise"],
+                "tax_paise": q["tax_paise"],
+                "total_paise": q["total_paise"],
+                "paid_paise": paid,
+                # Read off the quote, never off the request. There
+                # is no `agencyId` parameter anywhere on the booking
+                # path, so the only way a stay can be billed to a
+                # credit line is if `b2b_commit_credit` put the
+                # agency on the quote — which it only does under the
+                # agency's own row lock, having checked the limit.
+                "b2b_agent_id": q.get("b2b_agent_id"),
+                "source": source,
+                "status": "confirmed",
+                "payment_status": _payment_status(paid, q["total_paise"]),
+                "notes": notes,
+                "created_by": created_by,
+                # The thread it was sold in, if it was sold in one.
+                # Falls back to the quote's own thread: an order
+                # raised on the booking page for a quote the AI
+                # made still belongs to that conversation, and the
+                # guest asking about it is on that conversation.
+                "conversation_id": conversation_id or q.get("conversation_id"),
+                **fee_columns,
+            },
+            compensate=_compensate,
+        )
         db.table("quotes").update({"status": "converted"}).eq("id", q["id"]).execute()
 
         # The per-night trail. This is what the night audit posts from, which is
@@ -645,4 +681,10 @@ async def create_reservation(
 
         return reservation
 
-    return await run_db(_write)
+    reservation = await run_db(_write)
+    # The stock moved; tell the channels. Never raises — a sale must not fail
+    # because Repull is unreachable.
+    from app.services.repull import ari_push
+    await ari_push.enqueue_stay(property_id, reservation.get("room_type_id"),
+                                reservation.get("check_in"), reservation.get("check_out"))
+    return reservation

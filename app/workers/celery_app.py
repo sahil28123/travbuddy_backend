@@ -87,6 +87,14 @@ _STAYOS_SCHEDULE = {
     "stayos-inventory-drift": {
         "task": "travbuddy.pms.reconcile_inventory", "schedule": 3600,
     },
+    # The calendar out to Airbnb, Booking.com, Vrbo and tiket.com, in full, once
+    # a night. Every edit already pushes its own nights; this is what moves the
+    # far edge of the sold window forward a day and repairs any push lost to a
+    # broker outage. Enqueues one push per mapped room type and does nothing at
+    # all unless Repull is enabled — see services/repull/ari_push.py.
+    "stayos-repull-resync": {
+        "task": "travbuddy.pms.repull_resync_all", "schedule": 24 * 3600,
+    },
 }
 
 
@@ -131,6 +139,7 @@ celery_app = Celery(
         "app.workers.partner_tasks",
         "app.workers.messaging_tasks",
         "app.workers.marketing_tasks",
+        "app.workers.repull_tasks",
     ],
 )
 

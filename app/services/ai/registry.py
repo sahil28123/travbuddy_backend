@@ -144,8 +144,16 @@ def get(name: str) -> ToolSpec:
 # The capability names a tool may declare in `requires`.
 OUTBOUND = "outbound"      # reaches messaging.send; the channel needs a policy
 TEMPLATES = "templates"    # sends an approved template; Instagram has none
+# Takes the guest off the channel they wrote on: a direct booking, a payment
+# link, a link to the hotel's own pages, a cancellation done here rather than
+# where the booking lives. Every channel allows it except an OTA thread —
+# Airbnb, Booking.com, Vrbo and tiket.com forbid moving a guest off-platform,
+# Airbnb rejects messages carrying off-platform links outright, and a booking
+# the OTA sold can only be cancelled on the OTA (cancelling it here would leave
+# the guest booked there and the room free here).
+OFF_PLATFORM = "off_platform"
 
-CAPABILITIES = (OUTBOUND, TEMPLATES)
+CAPABILITIES = (OUTBOUND, TEMPLATES, OFF_PLATFORM)
 
 
 def channel_capabilities(channel: str | None) -> frozenset[str]:
@@ -164,10 +172,15 @@ def channel_capabilities(channel: str | None) -> frozenset[str]:
 
     name = channel or channel_policy.WHATSAPP
     if name not in channel_policy.channels():
-        return frozenset()
+        # No provider (the staff console, web chat, phone, email): nothing to
+        # send through, but nothing forbids a direct booking either.
+        return frozenset({OFF_PLATFORM})
+    rules = channel_policy.for_channel(name)
     able = {OUTBOUND}
-    if channel_policy.for_channel(name).supports_templates:
+    if rules.supports_templates:
         able.add(TEMPLATES)
+    if rules.allows_off_platform:
+        able.add(OFF_PLATFORM)
     return frozenset(able)
 
 

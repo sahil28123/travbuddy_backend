@@ -27,9 +27,11 @@ from app.services.messaging import policy
 # Copied from the CHECK on `conversations.channel`. Keep in step: the point of
 # this list is to be the same list.
 #
-#   check (channel = any (array['whatsapp','instagram','website','phone',
-#                               'email','internal']))
-STORABLE_CHANNELS = ("whatsapp", "instagram", "website", "phone", "email", "internal")
+#   check (channel in ('whatsapp','instagram','website','phone','email',
+#                      'internal','ota'))
+#
+# `ota` since migrations/2026-11-28_a_hotel_can_sell_on_the_channels.sql.
+STORABLE_CHANNELS = ("whatsapp", "instagram", "website", "phone", "email", "internal", "ota")
 
 
 @pytest.mark.parametrize("channel", STORABLE_CHANNELS)
@@ -70,6 +72,27 @@ def test_the_website_chat_carries_no_window():
     """
     assert "website" in policy.WINDOWLESS
     assert policy.has_window("website") is False
+
+
+def test_an_ota_thread_is_always_open_and_can_still_send():
+    """
+    No window is not the same as nothing to send to.
+
+    An OTA lets a host answer a guest at any time, so `ota` has no window — but
+    unlike the WINDOWLESS channels it has a provider, and folding it into that
+    set would have stripped the agent of its sending tools on the one channel
+    where every guest has already booked.
+    """
+    assert "ota" not in policy.WINDOWLESS
+    assert policy.has_window("ota") is False
+    assert policy.always_open("ota") is True
+    pol = policy.for_channel("ota")
+    assert pol.supports_templates is False
+    assert pol.bills_per_conversation is False
+    assert pol.conversation_usage_type is None
+    # And the channels that do carry a window are not mistaken for it.
+    assert policy.always_open("whatsapp") is False
+    assert policy.always_open("internal") is False
 
 
 def test_a_channel_nobody_has_thought_about_still_raises():

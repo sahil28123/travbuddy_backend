@@ -22,6 +22,10 @@ An async **FastAPI** backend powering AI-driven multi-city trip planning, live t
   - Partner listing extraction from brochures/PDFs/text using Gemini, availability and pricing matching, Razorpay checkout and webhooks, saved trips/documents, and travel groups.
 - **HostOS / StayOS — Hotel PMS & AI Guest Messaging (`ENABLE_HOTEL_OS=true`)**
   - Optional second deployment mode (`/api/v1/pms/*`, `/api/v1/messaging/*`) for property management (rooms, quotes, reservations, front-desk check-in, folios, hotel websites) and automated guest messaging over WhatsApp Cloud API, Instagram DMs, and web chat.
+- **Sell on Airbnb, Booking.com, Vrbo and more with [Repull](https://repull.dev) (`ENABLE_REPULL=true`)**
+  - HostOS rates and availability push to every connected channel; channel bookings, changes and cancellations arrive as HostOS reservations.
+  - Airbnb, Booking.com, Vrbo and tiket.com guest messages reach the same AI front-desk and guest agents as WhatsApp and Instagram.
+  - Import room types and upcoming bookings from Mews, Cloudbeds, Guesty, Hostaway and the other PMSs Repull connects. Full guide: [`docs/repull.md`](./docs/repull.md).
 
 ---
 
@@ -193,6 +197,7 @@ Set `ENABLE_HOTEL_OS=true` to mount `/api/v1/pms/*`, `/api/v1/messaging/*`, and 
 | `WHATSAPP_APP_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_CONFIG_ID` | Meta WhatsApp Cloud API & Embedded Signup credentials |
 | `INSTAGRAM_APP_ID`, `INSTAGRAM_OAUTH_CLIENT_SECRET`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_VERIFY_TOKEN`, `INSTAGRAM_REDIRECT_URI` | Meta Instagram Login & Messaging webhooks |
 | `ENABLE_GOOGLE_BUSINESS_PROFILE`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` | Optional Google Business Profile integration |
+| `ENABLE_REPULL`, `REPULL_API_KEY`, `REPULL_WEBHOOK_SECRET`, `REPULL_CONNECT_REDIRECT_URL` | Optional channel connectivity (Airbnb, Booking.com, Vrbo, tiket.com) and PMS import via [Repull](https://repull.dev). Get a key at [repull.dev/register](https://repull.dev/register). See [`docs/repull.md`](./docs/repull.md) |
 
 ---
 
@@ -330,6 +335,7 @@ HOTEL_CITY=Jaipur ORIGIN=Mumbai DEST=Goa python scripts/dump_consolidated.py
 
 - [`readme_run.md`](./readme_run.md) — Quick command cheat sheet for local dev and backfill jobs
 - [`DEPLOYING_STAYOS.md`](./DEPLOYING_STAYOS.md) — Dual-deployment architecture for HostOS / StayOS
+- [`docs/repull.md`](./docs/repull.md) — Selling on Airbnb, Booking.com, Vrbo and more with Repull: setup, API key, webhooks, what syncs
 - [`SHUTDOWN.md`](./SHUTDOWN.md) — Notes on retired production infrastructure
 - [`docs/recommendation_engine.md`](./docs/recommendation_engine.md) — Hybrid recommendation pipeline design
 - [`docs/trip_engine_architecture.md`](./docs/trip_engine_architecture.md) — Multi-stop trip engine architecture

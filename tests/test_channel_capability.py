@@ -69,7 +69,7 @@ def shown_on(channel: str) -> set[str]:
 # they were found by writing the derivation below and letting it disagree with
 # the hand-maintained list.
 
-ALL_CHANNELS = ("whatsapp", "instagram", "website", "internal", "phone", "email")
+ALL_CHANNELS = ("whatsapp", "instagram", "website", "internal", "phone", "email", "ota")
 
 
 def sends_outbound(spec) -> bool:
@@ -146,13 +146,37 @@ def test_the_capability_of_a_channel_comes_from_the_messaging_policy():
     provider.
     """
     assert registry.channel_capabilities("whatsapp") == {
-        registry.OUTBOUND, registry.TEMPLATES}
+        registry.OUTBOUND, registry.TEMPLATES, registry.OFF_PLATFORM}
     # Instagram has no approved-template mechanism, so a tool needing one is
     # not offered there — the second dimension, which the name-list could not
     # express at all.
-    assert registry.channel_capabilities("instagram") == {registry.OUTBOUND}
+    assert registry.channel_capabilities("instagram") == {
+        registry.OUTBOUND, registry.OFF_PLATFORM}
+    # OTA threads (through Repull): sendable, no templates — and no window, which
+    # is *not* WINDOWLESS. See `ChannelPolicy.windowed`. And never off-platform.
+    assert registry.channel_capabilities("ota") == {registry.OUTBOUND}
     for channel in policy.WINDOWLESS:
-        assert registry.channel_capabilities(channel) == frozenset()
+        assert registry.channel_capabilities(channel) == {registry.OFF_PLATFORM}
+
+
+OFF_PLATFORM_TOOLS = ("create_booking", "create_booking_payment_link", "cancel_booking",
+                      "create_payment_link", "get_check_in_link", "get_hotel_page_link")
+
+
+def test_an_ota_guest_is_never_taken_off_the_channel():
+    """
+    Airbnb, Booking.com, Vrbo and tiket.com forbid moving a guest off-platform,
+    and Airbnb rejects a message carrying an off-platform link. A booking the OTA
+    sold is cancelled on the OTA, not here. So on `ota` the agent answers, quotes
+    and helps — and is not offered the tools that book, charge, link or cancel
+    outside the channel.
+    """
+    on_ota = shown_on("ota")
+    for name in OFF_PLATFORM_TOOLS:
+        assert name not in on_ota, f"{name} offered in an OTA thread"
+        assert name in shown_on("whatsapp"), f"{name} lost on WhatsApp"
+    assert "send_message" in on_ota
+    assert "get_booking_status" in on_ota
 
 
 def test_the_template_tool_is_not_offered_where_there_are_no_templates():
@@ -193,7 +217,7 @@ def test_a_channel_that_cannot_send_is_not_offered_the_sending_tool(channel):
     )
 
 
-@pytest.mark.parametrize("channel", ["whatsapp", "instagram"])
+@pytest.mark.parametrize("channel", ["whatsapp", "instagram", "ota"])
 def test_a_channel_that_can_send_still_gets_it(channel):
     """
     The half that would be a much worse regression. On the DM channels the
@@ -227,7 +251,7 @@ def test_every_channel_the_database_allows_is_decided_one_way_or_the_other():
     for wearing a different hat.
     """
     stored = set(policy.channels()) | set(policy.WINDOWLESS)
-    for channel in ("whatsapp", "instagram", "website", "internal", "phone", "email"):
+    for channel in ("whatsapp", "instagram", "website", "internal", "phone", "email", "ota"):
         assert channel in stored, (
             f"{channel!r} can be stored on a conversation and is in neither "
             f"_POLICIES nor WINDOWLESS"

@@ -29,6 +29,7 @@ from app.db.client import get_db, run_db
 from app.services.ai.context import AgentContext
 from app.services.ai.errors import OutOfScope, ToolUnavailable
 from app.services.ai.ids import ResourceId
+from app.services.ai import registry
 from app.services.ai.registry import tool
 from app.services.pms import money, public_booking, stay_payment
 
@@ -101,6 +102,7 @@ class PaymentLinkArgs(BaseModel):
     mutating=True,
     usage_type="ai.tool_write",
     result_type="payment_link",
+    requires=(registry.OFF_PLATFORM,),
 )
 async def create_payment_link(args: PaymentLinkArgs, ctx: AgentContext) -> tuple[dict, str]:
     reservation_id = await _this_stay(ctx, args.reservation_id)
@@ -176,6 +178,7 @@ def _read_stay(property_id: str, reservation_id: str) -> dict | None:
     mutating=False,
     usage_type="ai.tool_read",
     result_type="check_in_link",
+    requires=(registry.OFF_PLATFORM,),
 )
 async def get_check_in_link(args: CheckInLinkArgs, ctx: AgentContext) -> tuple[dict, str]:
     from app.config import settings
@@ -452,6 +455,7 @@ def _hotel_page(property_id: str, conversation_id: str | None,
     usage_type="ai.tool_read",
     result_type="none",
     scoped_to_conversation=True,
+    requires=(registry.OFF_PLATFORM,),
 )
 async def get_hotel_page_link(args: HotelPageArgs, ctx: AgentContext) -> dict:
     """

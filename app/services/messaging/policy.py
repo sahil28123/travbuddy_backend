@@ -53,6 +53,12 @@ WEBSITE = "website"
 # and the moment something does it must not be the Inbox that finds out.
 PHONE = "phone"
 EMAIL = "email"
+# Guest messages on Airbnb, Booking.com, Vrbo and tiket.com, carried by Repull
+# (https://repull.dev). One channel rather than four: the hotel's reply goes
+# back through the same Repull conversation whichever OTA the guest booked on,
+# and nothing about *sending* differs between them — Repull owns the per-OTA
+# rules (Airbnb stripping a phone number, Vrbo queueing a busy thread).
+OTA = "ota"
 
 
 @dataclass(frozen=True)
@@ -62,9 +68,15 @@ class ChannelPolicy:
     # Where the account→property mapping lives, and the SECURITY DEFINER
     # function that reads it. Never a table read from the service: the resolver
     # is the only trusted route from an inbound payload to a hotel.
+    #
+    # `resolver_rpc=None` is the one exception, and it is the OTA channel:
+    # `repull_connections` is written only by the server, keyed on a
+    # `workspace_id` Repull minted, and the id arrives inside a webhook whose
+    # HMAC has already been checked against our own secret. There is no
+    # partner-supplied value in the lookup for a definer function to guard.
     connections_table: str
-    resolver_rpc: str
-    resolver_arg: str
+    resolver_rpc: str | None
+    resolver_arg: str | None
     # The column on the connection row holding the provider's id for our end.
     account_column: str
 
@@ -83,6 +95,30 @@ class ChannelPolicy:
     # A callable rather than an int because Instagram's answer depends on who
     # is answering.
     window_hours: Callable[[dict], int] = field(default=lambda _c: 24)
+
+    # False for a channel with a provider and **no** reply window at all.
+    #
+    # Not the same thing as WINDOWLESS below, and the difference is the whole
+    # reason this is a field. WINDOWLESS channels have no window because there
+    # is nothing to send to — the staff console, a web page that has closed.
+    # An OTA thread has no window because the OTA lets a host answer a guest
+    # whenever they like, before, during and after the stay: it is *always*
+    # open. Folding it into WINDOWLESS would have stripped the agent of its
+    # sending tools on exactly the channel where it most needs them.
+    windowed: bool = True
+
+    # False where the channel's owner forbids taking the guest elsewhere — the
+    # OTA thread. The agent is then not offered direct bookings, payment links,
+    # links to the hotel's own pages or cancellations; see
+    # `ai.registry.OFF_PLATFORM`.
+    allows_off_platform: bool = True
+
+    # Which `status` values on the connection row mean "send through this".
+    # Meta connections say `connected`; a Repull workspace says `active`.
+    live_statuses: tuple[str, ...] = ("connected", "pending")
+    # The connection row's primary key. `repull_connections` is keyed on the
+    # property it belongs to — one workspace per hotel — so it has no `id`.
+    connection_key: str = "id"
 
     def human_is_handling(self, conversation: dict) -> bool:
         return (conversation.get("handler") or "ai") in ("human", "human_requested")
@@ -135,6 +171,27 @@ _POLICIES = {
         conversation_usage_type="instagram.conversation",
         window_hours=_instagram_window,
     ),
+    OTA: ChannelPolicy(
+        channel=OTA,
+        connections_table="repull_connections",
+        resolver_rpc=None,
+        resolver_arg=None,
+        account_column="workspace_id",
+        # An OTA has no approved-template mechanism, and needs none: nothing
+        # ever closes the thread.
+        supports_templates=False,
+        # Repull does not bill per conversation and neither does any OTA. The
+        # agent's own turns are metered by the pipeline as they are everywhere.
+        bills_per_conversation=False,
+        conversation_usage_type=None,
+        windowed=False,
+        allows_off_platform=False,
+        # `pending` is a workspace whose hotel has started Connect: a guest
+        # message can only arrive once an account is attached, and refusing to
+        # answer it over a status that lags by one webhook would be worse.
+        live_statuses=("active", "pending"),
+        connection_key="property_id",
+    ),
 }
 
 
@@ -183,7 +240,22 @@ WINDOWLESS = frozenset({INTERNAL, WEBSITE, PHONE, EMAIL})
 
 def has_window(channel: str | None) -> bool:
     """Whether free-form outbound on this channel is time-limited at all."""
-    return (channel or WHATSAPP) not in WINDOWLESS
+    name = channel or WHATSAPP
+    if name in WINDOWLESS:
+        return False
+    pol = _POLICIES.get(name)
+    return pol.windowed if pol is not None else True
+
+
+def always_open(channel: str | None) -> bool:
+    """
+    A channel we can send on whenever we like: a provider, and no window.
+
+    The OTA channel today. Distinct from `not has_window()`, which is also true
+    of the staff console — where there is nothing to send to at all.
+    """
+    pol = _POLICIES.get(channel or WHATSAPP)
+    return pol is not None and not pol.windowed
 
 
 def for_channel(channel: str | None) -> ChannelPolicy:
