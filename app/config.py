@@ -247,6 +247,34 @@ class Settings(BaseSettings):
     # looks like to a hotelier.
     whatsapp_onboarding_enabled: bool = False
 
+    # ── Repull (Airbnb, Booking.com, Vrbo, tiket.com and PMS connectivity) ────
+    #
+    # Repull is the channel manager behind "sell this hotel on the OTAs": one
+    # API key, one webhook, and every connected channel. See docs/repull.md.
+    #
+    # Off by default, like `enable_hotel_os`, and only meaningful inside it — the
+    # Repull routes mount in the hotel-OS block of `api/v1/router.py`, because
+    # every one of them reads `properties`, `room_types` and `reservations`.
+    #
+    # `repull_api_key` is the operator's `sk_live_…` key from
+    # https://repull.dev/dashboard/keys. Each hotel gets its own Repull
+    # sub-workspace under that key, so one HostOS deployment serves many hotels
+    # without their channel accounts ever seeing each other.
+    #
+    # `repull_webhook_secret` is the `whsec_…` value Repull returns once, when
+    # the webhook is registered. Without it the webhook refuses everything —
+    # an unsigned reservation is not one this system will book a room for.
+    enable_repull: bool = False
+    repull_api_key: Optional[str] = None
+    repull_base_url: str = "https://api.repull.dev"
+    repull_webhook_secret: Optional[str] = None
+    # Where Repull's hosted Connect page sends the hotelier back to after they
+    # pick their channels. Usually a page of the partner app.
+    repull_connect_redirect_url: Optional[str] = None
+    # How far ahead the calendar is pushed on a full resync. A year is what the
+    # OTAs actually sell; the nightly beat keeps the far edge from going stale.
+    repull_resync_days: int = 365
+
     # ── Instagram ────────────────────────────────────────────────────────────
     #
     # Two windows, because Meta gives two. An automated reply gets 24 hours from

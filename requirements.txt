@@ -36,6 +36,8 @@ diskcache==5.6.3
 
 # HTTP client
 httpx==0.28.1
+# Repull — Airbnb, Booking.com, Vrbo, tiket.com + PMS connectivity (docs/repull.md)
+repull-sdk>=0.2.65
 
 # Browser-impersonation client (used for Expedia — bypasses Akamai bot detection)
 curl-cffi>=0.7.0

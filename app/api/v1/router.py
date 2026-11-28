@@ -98,6 +98,13 @@ if settings.enable_hotel_os:
     # is the honest answer to "does this deployment do Google".
     if settings.enable_google_business_profile:
         router.include_router(google_router)
+    # Repull: Airbnb, Booking.com, Vrbo and tiket.com, plus PMS imports.
+    # Hotel-OS *and* switched on, for the same reason as Google: without a key
+    # every route here would answer a hotelier with a configuration error.
+    # Imported lazily so a deployment without repull-sdk installed still boots.
+    if settings.enable_repull:
+        from app.api.v1.pms.repull import router as repull_router
+        router.include_router(repull_router)
     logger.info("Hotel OS routes mounted (ENABLE_HOTEL_OS=true, db=%s)",
                 settings.supabase_url)
 else:
