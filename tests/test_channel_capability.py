@@ -69,7 +69,7 @@ def shown_on(channel: str) -> set[str]:
 # they were found by writing the derivation below and letting it disagree with
 # the hand-maintained list.
 
-ALL_CHANNELS = ("whatsapp", "instagram", "website", "internal", "phone", "email")
+ALL_CHANNELS = ("whatsapp", "instagram", "website", "internal", "phone", "email", "ota")
 
 
 def sends_outbound(spec) -> bool:
@@ -151,6 +151,9 @@ def test_the_capability_of_a_channel_comes_from_the_messaging_policy():
     # not offered there — the second dimension, which the name-list could not
     # express at all.
     assert registry.channel_capabilities("instagram") == {registry.OUTBOUND}
+    # OTA threads (through Repull): sendable, no templates — and no window, which
+    # is *not* WINDOWLESS. See `ChannelPolicy.windowed`.
+    assert registry.channel_capabilities("ota") == {registry.OUTBOUND}
     for channel in policy.WINDOWLESS:
         assert registry.channel_capabilities(channel) == frozenset()
 
@@ -193,7 +196,7 @@ def test_a_channel_that_cannot_send_is_not_offered_the_sending_tool(channel):
     )
 
 
-@pytest.mark.parametrize("channel", ["whatsapp", "instagram"])
+@pytest.mark.parametrize("channel", ["whatsapp", "instagram", "ota"])
 def test_a_channel_that_can_send_still_gets_it(channel):
     """
     The half that would be a much worse regression. On the DM channels the
@@ -227,7 +230,7 @@ def test_every_channel_the_database_allows_is_decided_one_way_or_the_other():
     for wearing a different hat.
     """
     stored = set(policy.channels()) | set(policy.WINDOWLESS)
-    for channel in ("whatsapp", "instagram", "website", "internal", "phone", "email"):
+    for channel in ("whatsapp", "instagram", "website", "internal", "phone", "email", "ota"):
         assert channel in stored, (
             f"{channel!r} can be stored on a conversation and is in neither "
             f"_POLICIES nor WINDOWLESS"

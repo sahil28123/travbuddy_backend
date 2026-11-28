@@ -27,6 +27,10 @@ comment on table public.repull_connections is
   'One Repull sub-workspace per hotel. A webhook carries workspaceId, which is '
   'how an incoming booking or guest message finds its property.';
 
+-- When this hotel last heard from a guest on an OTA thread. The same column the
+-- WhatsApp and Instagram connections carry, written by the same code path.
+alter table public.repull_connections add column if not exists last_inbound_at timestamptz;
+
 -- ── which listing is which room type ─────────────────────────────────────────
 
 create table if not exists public.repull_room_map (

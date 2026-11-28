@@ -154,6 +154,14 @@ def _build_adapter(connection: dict, *, db_token: str | None = None):
     # from `phone_number_id is not None` would do exactly that the first time a
     # column is added.
     channel = connection.get("channel") or "whatsapp"
+
+    # OTA threads, through Repull. No per-hotel secret exists to resolve: every
+    # hotel is sent through with the operator's one REPULL_API_KEY, scoped to
+    # the hotel's own workspace by `X-Workspace-Id`. So the connection row
+    # supplies only the workspace, and the key never leaves settings.
+    if channel == "ota":
+        return _build_ota_adapter(connection)
+
     creds = resolve(connection.get("credentials_ref") or "default", channel,
                     db_token=db_token)
     sandbox = bool(connection.get("is_sandbox") or creds.is_sandbox)
@@ -187,3 +195,31 @@ def _build_adapter(connection: dict, *, db_token: str | None = None):
         phone_number_id=connection["phone_number_id"],
         access_token=creds.access_token,
     )
+
+
+def _build_ota_adapter(connection: dict):
+    """
+    The OTA adapter, or its fake.
+
+    Sandbox is chosen the way the Meta channels choose it — an explicit
+    `is_sandbox` on the row, or the sandbox ref (`"sandbox"` unless configured)
+    standing where a real id would be, here the workspace id. A Repull
+    workspace id is numeric, so no real hotel can collide with it.
+    """
+    from app.services.messaging.ota.adapter import OtaAdapter
+    from app.services.messaging.ota.fake import FakeOtaAdapter
+    from app.services.repull import client as repull_client
+
+    workspace = str(connection.get("workspace_id") or "")
+    sandbox_ref = getattr(settings, "repull_sandbox_ref", settings.whatsapp_sandbox_ref)
+    if connection.get("is_sandbox") or workspace == sandbox_ref:
+        return FakeOtaAdapter(workspace_id=workspace or "sandbox")
+    if not repull_client.enabled():
+        raise MessagingError(
+            NOT_CONFIGURED,
+            "Repull is not enabled on this deployment (ENABLE_REPULL and "
+            "REPULL_API_KEY), so OTA replies cannot be sent",
+        )
+    if not workspace:
+        raise MessagingError(NOT_CONFIGURED, "the OTA connection has no Repull workspace id")
+    return OtaAdapter(workspace_id=workspace)
